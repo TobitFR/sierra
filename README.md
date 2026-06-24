@@ -25,10 +25,10 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 ┌─────────────────────────────────────────────────────┐
 │                 Raspberry Pi (RPi)                  │
 │                                                     │
-│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)   │
-│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv)  │
+│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)  │
+│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv) │
 │                                                     │
-│  RetroPrinter converts .raw ──► .pdf                │
+│  RetroPrinter converts .raw ──► .pdf               │
 │  then triggers CustomScript.sh                      │
 │                                                     │
 │  CustomScript.sh  (flock serialized)                │
@@ -43,7 +43,7 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 │    │     Merges with pdfunite (text first)          │
 │    │     Releases solo files after 5min timeout     │
 │    │                                                │
-│    └── FTP transfer ──► MMGT (D:/QTG)               │
+│    └── FTP transfer ──► MMGT (D:/QTG)              │
 │          (skips files still carrying §NNN)          │
 │                                                     │
 └─────────────────────────────────────────────────────┘
@@ -61,11 +61,20 @@ The spooler sequence number embedded in the filename (`dfA0NN`, 000–999 with r
 
 ### 2. PDF conversion (RetroPrinter)
 
-RetroPrinter on the RPi converts each `.raw` file to a `.pdf`, preserving the original filename. On completion it triggers `CustomScript.sh`.
+RetroPrinter on the RPi converts each `.raw` file to a `.pdf`, assigning its own filename in the format `retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf` (the `-FULL` suffix indicates a multi-page document). The original `dfA0NNs12sun` filename is not preserved. On completion it triggers `CustomScript.sh`.
+
+RetroPrinter processes files strictly one at a time.
 
 ### 3. Identification and renaming (`ocr_rename.sh`)
 
-Reads the `.raw` file paired to the just-converted PDF **by exact filename match** (not "most recent in folder", which caused mismatches when text and graph arrived seconds apart). Extracts:
+Reads the `.raw` file from `/home/pi/data/raw/` to identify the just-converted PDF. Since RetroPrinter generates its own filenames with no relation to the original `dfA0NNs12sun.raw` name, pairing is done by taking the **most recent RAW in the folder** rather than by name matching. This is reliable because:
+
+- RetroPrinter processes files one at a time (no concurrent conversions)
+- `CustomScript.sh` holds a blocking flock for its entire duration (executions are serialized)
+
+At the moment `ocr_rename.sh` runs, exactly one RAW file is present and it is always the correct one.
+
+From the RAW content, the script extracts:
 
 - **Simulator prefix** from the `SIMULATOR :` field → e.g. `[A330]`
 - **QTG test code** from the `CODE` pattern, or top non-empty lines as fallback
@@ -118,8 +127,8 @@ All PDFs in `/home/pi/data/pdf/` that do not already exist on the MMGT FTP serve
 | Stage | Example filename |
 |-------|-----------------|
 | Spooler (Sun) | `dfA047s12sun` |
-| After `.raw` rename | `dfA047s12sun.raw` |
-| After RetroPrinter conversion | `dfA047s12sun.pdf` |
+| After `.raw` rename (Sun) | `dfA047s12sun.raw` |
+| After RetroPrinter conversion (RPi) | `retro-printer_2026-06-21_143201-FULL.pdf` |
 | After `ocr_rename.sh` (text) | `[A330] B1 2.3 2026-06-21 14-32-01 §047.pdf` |
 | After `ocr_rename.sh` (graph) | `[GRAPH] GRAPH 2026-06-21 14-32-03 §048.pdf` |
 | After `group_qtg.sh` (merged) | `[A330] B1 2.3 2026-06-21 14-32-01.pdf` |
@@ -183,7 +192,7 @@ tail -f /var/log/retroprinterTSK.log
 
 **Sequence-based pairing over time-based pairing** — The Sun spooler assigns a monotonically incrementing 3-digit sequence number (`dfA0NN`) to each print job. Text and graph files from the same QTG test are always consecutive jobs (ecart of 1, modulo 1000). Using this as the pairing key is more reliable than any time window, and removes the need for the 90-second inter-file delay that was previously required on the Sun side.
 
-**Strict RAW↔PDF matching by filename** — `ocr_rename.sh` previously selected the most recent RAW file in the folder, which caused occasional misidentifications when two files arrived within seconds of each other. The new logic matches `dfA047s12sun.pdf` to `dfA047s12sun.raw` by name, with a fallback to most-recent only if no exact match is found.
+**Most-recent RAW matching, made reliable by serialization** — RetroPrinter generates its own filenames (`retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf`) with no relation to the original `dfA0NNs12sun` spooler name, making name-based RAW↔PDF matching impossible. Instead, `ocr_rename.sh` picks the most recent RAW in `/home/pi/data/raw/`. This is safe because RetroPrinter processes files one at a time, and `CustomScript.sh` holds a blocking flock for its entire duration — at the moment `ocr_rename.sh` runs, exactly one RAW is present and it is always the correct one.
 
 **Serialized processing via flock** — `CustomScript.sh` holds a blocking file lock for its entire duration. Concurrent invocations (one per converted file) queue up and execute sequentially, replacing the upstream 90-second delay with downstream serialization. `group_qtg.sh` uses a non-blocking lock when called from cron (skip and retry in 2 minutes if busy), but blocks when called from within `CustomScript.sh` via the parent lock.
 

@@ -7,12 +7,13 @@
 # m_spts_sierra-deamon, sous la forme dfA0NNs12sun.raw).
 #
 # Logique :
-#   - Le RAW est apparié au PDF par correspondance STRICTE de nom (même racine
-#     de fichier), et non plus "le RAW le plus récent du dossier" — l'ancien
-#     comportement pouvait piocher le mauvais RAW si deux conversions se
-#     chevauchaient (texte + graphique envoyés à quelques secondes d'écart).
-#     Un fallback "plus récent" subsiste si aucune correspondance exacte
-#     n'est trouvée, pour ne jamais bloquer le traitement.
+#   - RetroPrinter génère ses propres noms de fichiers
+#     (retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf), sans lien avec le nom
+#     du RAW d'origine (dfA0NNs12sun.raw). L'appariement PDF↔RAW se fait
+#     donc par "RAW le plus récent dans /home/pi/data/raw/", ce qui est
+#     fiable car RetroPrinter traite les fichiers un par un ET CustomScript.sh
+#     est protégé par un flock bloquant — au moment où ce script s'exécute,
+#     un seul RAW est présent et c'est forcément le bon.
 #   - Le contenu du RAW est lu pour extraire le simulateur (SIMULATOR :) et
 #     le code QTG (pattern CODE, ou à défaut les premières lignes non vides).
 #   - Si un RAW est présent mais qu'aucun code n'est identifiable, le fichier
@@ -101,26 +102,19 @@ process_file() {
 
     # --- RAW FILE EXTRACTION (PRIMARY) ---
     local RAW_FILE=""
-    local basename_noext="${filename%.*}"
 
     if [ -f "$forced_raw" ]; then
         RAW_FILE="$forced_raw"
     else
-        # Appariement STRICT par nom : on cherche le RAW dont le nom
-        # correspond exactement au PDF traité (pas "le plus récent du dossier",
-        # qui peut piocher le mauvais RAW si deux conversions se chevauchent).
-        RAW_FILE=$(ls "$RAW_DIR/${basename_noext}".raw 2>/dev/null | head -n 1)
+        # RetroPrinter génère ses propres noms de fichiers (retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf)
+        # sans lien avec le nom du RAW d'origine (dfA0NNs12sun.raw). Un appariement par nom
+        # est donc impossible. On prend le RAW le plus récent, ce qui est fiable car :
+        #   - RetroPrinter traite les fichiers un par un (jamais deux conversions en parallèle)
+        #   - CustomScript.sh est protégé par un flock bloquant (exécutions sérialisées)
+        # => au moment où ce script s'exécute, un seul RAW est présent et c'est forcément le bon.
+        RAW_FILE=$(ls -t "$RAW_DIR"/*.raw 2>/dev/null | head -n 1)
         if [ -z "$RAW_FILE" ]; then
-            RAW_FILE=$(ls "$TARGET_DIR/${basename_noext}".raw 2>/dev/null | head -n 1)
-        fi
-        # Fallback ultime : si rien ne correspond par nom exact, on retombe
-        # sur l'ancien comportement (le plus récent) pour ne rien bloquer.
-        if [ -z "$RAW_FILE" ]; then
-            log "WARN" "No exact RAW match for $filename — falling back to most recent RAW."
-            RAW_FILE=$(ls -t "$RAW_DIR"/*.raw 2>/dev/null | head -n 1)
-            if [ -z "$RAW_FILE" ]; then
-                RAW_FILE=$(ls -t "$TARGET_DIR"/*.raw 2>/dev/null | head -n 1)
-            fi
+            RAW_FILE=$(ls -t "$TARGET_DIR"/*.raw 2>/dev/null | head -n 1)
         fi
     fi
 
