@@ -25,10 +25,10 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 ┌─────────────────────────────────────────────────────┐
 │                 Raspberry Pi (RPi)                  │
 │                                                     │
-│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)  │
-│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv) │
+│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)   │
+│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv)  │
 │                                                     │
-│  RetroPrinter converts .raw ──► .pdf               │
+│  RetroPrinter converts .raw ──► .pdf                │
 │  then triggers CustomScript.sh                      │
 │                                                     │
 │  CustomScript.sh  (flock serialized)                │
@@ -43,7 +43,7 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 │    │     Merges with pdfunite (text first)          │
 │    │     Releases solo files after 5min timeout     │
 │    │                                                │
-│    └── FTP transfer ──► MMGT (D:/QTG)              │
+│    └── FTP transfer ──► MMGT (D:/QTG)               │
 │          (skips files still carrying §NNN)          │
 │                                                     │
 └─────────────────────────────────────────────────────┘
