@@ -8,12 +8,15 @@
 #
 # Logique :
 #   - RetroPrinter génère ses propres noms de fichiers
-#     (retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf), sans lien avec le nom
-#     du RAW d'origine (dfA0NNs12sun.raw). L'appariement PDF↔RAW se fait
-#     donc par "RAW le plus récent dans /home/pi/data/raw/", ce qui est
-#     fiable car RetroPrinter traite les fichiers un par un ET CustomScript.sh
-#     est protégé par un flock bloquant — au moment où ce script s'exécute,
-#     un seul RAW est présent et c'est forcément le bon.
+#     (retro-printer_YYYY-MM-DD_HHMMSS[-FULL|-N].pdf), sans lien avec le nom
+#     du RAW d'origine (dfA0NNs12sun.raw). Les deux RAW d'une paire QTG
+#     (texte + graph) arrivent quasi simultanément sur le RPi. Le Sun envoie
+#     toujours le texte en premier (dfA0NN) puis le graph (dfA0NN+1), et
+#     RetroPrinter convertit dans l'ordre d'arrivée. On sélectionne donc le
+#     RAW dont le numéro de séquence dfA0NN est le plus bas parmi ceux
+#     disponibles : le 1er PDF converti (texte) prend le plus petit §NNN,
+#     le 2ème (graph) prend le RAW restant. Fallback sur le plus récent si
+#     les RAW ne sont pas au format dfA0NNs12sun.raw.
 #   - Le contenu du RAW est lu pour extraire le simulateur (SIMULATOR :) et
 #     le code QTG (pattern CODE, ou à défaut les premières lignes non vides).
 #   - Si un RAW est présent mais qu'aucun code n'est identifiable, le fichier
@@ -27,8 +30,12 @@
 #     seul PDF. Un PDF sans RAW exploitable n'a pas de §NNN et sera donc
 #     immédiatement traité comme un fichier indépendant par group_qtg.sh.
 #
-# Appelé par CustomScript.sh, juste après la conversion RetroPrinter et avant
-# l'étape de groupage et le transfert FTP vers le MMGT.
+# Appelé par CustomScript.sh avec le chemin complet du PDF à traiter
+# (ex: /home/pi/data/pdf/retro-printer_2026-06-27_185249.pdf), ce qui
+# force le mode fichier unique et évite le batch mode qui consommait les
+# RAW dans le mauvais ordre quand deux PDFs étaient présents simultanément.
+# Peut toujours être appelé sans argument (batch mode) pour un traitement
+# manuel de rattrapage.
 
 # Configuration
 TARGET_DIR="${1:-.}"
@@ -106,15 +113,39 @@ process_file() {
     if [ -f "$forced_raw" ]; then
         RAW_FILE="$forced_raw"
     else
-        # RetroPrinter génère ses propres noms de fichiers (retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf)
-        # sans lien avec le nom du RAW d'origine (dfA0NNs12sun.raw). Un appariement par nom
-        # est donc impossible. On prend le RAW le plus récent, ce qui est fiable car :
-        #   - RetroPrinter traite les fichiers un par un (jamais deux conversions en parallèle)
-        #   - CustomScript.sh est protégé par un flock bloquant (exécutions sérialisées)
-        # => au moment où ce script s'exécute, un seul RAW est présent et c'est forcément le bon.
-        RAW_FILE=$(ls -t "$RAW_DIR"/*.raw 2>/dev/null | head -n 1)
-        if [ -z "$RAW_FILE" ]; then
-            RAW_FILE=$(ls -t "$TARGET_DIR"/*.raw 2>/dev/null | head -n 1)
+        # RetroPrinter génère ses propres noms (retro-printer_YYYY-MM-DD_HHMMSS[-FULL|-N].pdf)
+        # sans lien avec le nom du RAW d'origine (dfA0NNs12sun.raw).
+        # Les deux RAW d'une paire QTG (texte + graph) arrivent quasi simultanément.
+        # RetroPrinter convertit dans l'ordre d'arrivée des fichiers, et le Sun envoie
+        # toujours le texte (dfA0NN) avant le graph (dfA0NN+1). Donc :
+        #   - 1er PDF converti (texte) → doit prendre le RAW avec le plus petit §NNN
+        #   - 2ème PDF converti (graph) → prend le RAW restant (le plus grand §NNN)
+        # On sélectionne donc le RAW dont le numéro de séquence dfA0NN est le plus bas
+        # parmi ceux disponibles. Si un seul RAW est présent, il est forcément le bon.
+
+        local best_raw="" best_seq=99999
+        for raw_candidate in "$RAW_DIR"/*.raw "$TARGET_DIR"/*.raw; do
+            [ -f "$raw_candidate" ] || continue
+            local raw_seq
+            raw_seq=$(basename "$raw_candidate" | sed -nE 's/^dfA([0-9]{3}).*/\1/p')
+            [ -z "$raw_seq" ] && continue
+            local raw_seq_int=$((10#$raw_seq))
+            if [ "$raw_seq_int" -lt "$best_seq" ]; then
+                best_seq=$raw_seq_int
+                best_raw="$raw_candidate"
+            fi
+        done
+
+        if [ -n "$best_raw" ]; then
+            RAW_FILE="$best_raw"
+            log "INFO" "RAW selected by lowest sequence number: $(basename "$RAW_FILE") (seq $best_seq)"
+        else
+            # Fallback : plus récent (si les RAW ne sont pas au format dfA0NNs12sun.raw)
+            log "WARN" "No dfA0NN-format RAW found — falling back to most recent."
+            RAW_FILE=$(ls -t "$RAW_DIR"/*.raw 2>/dev/null | head -n 1)
+            if [ -z "$RAW_FILE" ]; then
+                RAW_FILE=$(ls -t "$TARGET_DIR"/*.raw 2>/dev/null | head -n 1)
+            fi
         fi
     fi
 
@@ -143,6 +174,11 @@ process_file() {
         fi
 
         # Fallback: top non-empty lines of RAW
+        # Un filtre de qualité est appliqué : le code extrait doit contenir au moins
+        # un chiffre ET au moins une lettre minuscule ou un séparateur (point, tiret,
+        # espace). Cela élimine le bruit OCR des fichiers graphiques (ex: "PpGxaACCC...")
+        # qui ne contient que des majuscules/minuscules sans chiffres, et qui serait
+        # autrement accepté par le fallback, empêchant la catégorisation [GRAPH].
         if [ -z "$QTG_CODE" ]; then
             local raw_extract_line=$(sed '/^[[:space:]]*$/d' "$RAW_FILE" | head -n 5 | while read -r line; do
                 local extract=$(clean_qtg "$line")
@@ -152,15 +188,31 @@ process_file() {
                 fi
             done | head -n 1)
             if [ -n "$raw_extract_line" ]; then
-                QTG_CODE="$raw_extract_line"
-                OUTCOME="RAW_TOP_LINES"
-                log "INFO" "Extracted QTG from RAW (top lines): $QTG_CODE"
+                # Vérifier la qualité : doit contenir au moins un chiffre
+                if echo "$raw_extract_line" | grep -qE '[0-9]'; then
+                    QTG_CODE="$raw_extract_line"
+                    OUTCOME="RAW_TOP_LINES"
+                    log "INFO" "Extracted QTG from RAW (top lines): $QTG_CODE"
+                else
+                    log "WARN" "RAW top lines extraction returned no digits ('$raw_extract_line') — likely graph noise, categorizing as GRAPH."
+                fi
             fi
         fi
 
         # RAW présent mais aucun code trouvé = graphique identifié
         if [ -z "$QTG_CODE" ]; then
             log "WARN" "RAW found but no QTG code extracted — categorizing as GRAPH."
+            QTG_CODE="GRAPH"
+            PREFIX="[GRAPH]"
+            OUTCOME="GRAPH"
+        fi
+
+        # Un code a été trouvé mais PREFIX est vide (pas de champ SIMULATOR :) :
+        # les fichiers graphiques SIERRA peuvent contenir le code QTG en en-tête
+        # sans pour autant avoir le champ SIMULATOR. Un vrai fichier texte contient
+        # toujours SIMULATOR :. Sans ce champ, on catégorise [GRAPH].
+        if [ -n "$QTG_CODE" ] && [ "$QTG_CODE" != "GRAPH" ] && [ -z "$PREFIX" ]; then
+            log "WARN" "QTG code found ('$QTG_CODE') but no SIMULATOR field — likely graph with text header, categorizing as GRAPH."
             QTG_CODE="GRAPH"
             PREFIX="[GRAPH]"
             OUTCOME="GRAPH"
