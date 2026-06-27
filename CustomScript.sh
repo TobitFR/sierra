@@ -47,8 +47,19 @@ log "INFO" "Lock acquired, starting run."
 
 #------------------------------------
 # OCR Rename
-log "INFO" "Starting ocr_rename.sh"
-/home/pi/ocr_rename.sh
+# $1 = output_path (ex: /home/pi/data/pdf/)
+# $2 = filename sans suffixe de page (ex: retro-printer_2026-06-27_185249.pdf)
+#      Le fichier réel peut avoir un suffixe de page (-1, -2) ou -FULL :
+#      retro-printer_2026-06-27_185249-1.pdf ou retro-printer_2026-06-27_185249-FULL.pdf
+#      On résout le nom exact par glob avant de passer le chemin à ocr_rename.sh.
+PDF_BASE="${2%.pdf}"
+PDF_REAL=$(ls "${1}${PDF_BASE}"*.pdf 2>/dev/null | head -n 1)
+if [ -z "$PDF_REAL" ]; then
+    log "ERROR" "Cannot find PDF matching '${1}${PDF_BASE}*.pdf' — aborting."
+    exit 1
+fi
+log "INFO" "Starting ocr_rename.sh for: $(basename "$PDF_REAL")"
+/home/pi/ocr_rename.sh "$PDF_REAL"
 if [ $? -ne 0 ]; then
     log "ERROR" "ocr_rename.sh exited with error - FTP transfer aborted"
     exit 1
