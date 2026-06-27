@@ -25,10 +25,10 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 ┌─────────────────────────────────────────────────────┐
 │                 Raspberry Pi (RPi)                  │
 │                                                     │
-│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)  │
-│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv) │
+│  /home/pi/data/raw/   ◄── dfA0NNs12sun.raw  (OCR)   │
+│  /home/pi/data/pdf/   ◄── dfA0NNs12sun.raw  (conv)  │
 │                                                     │
-│  RetroPrinter converts .raw ──► .pdf               │
+│  RetroPrinter converts .raw ──► .pdf                │
 │  then triggers CustomScript.sh                      │
 │                                                     │
 │  CustomScript.sh  (flock serialized)                │
@@ -43,7 +43,7 @@ Currently in use for A330/A340 Full Flight Simulator qualification testing.
 │    │     Merges with pdfunite (text first)          │
 │    │     Releases solo files after 5min timeout     │
 │    │                                                │
-│    └── FTP transfer ──► MMGT (D:/QTG)              │
+│    └── FTP transfer ──► MMGT (D:/QTG)               │
 │          (skips files still carrying §NNN)          │
 │                                                     │
 └─────────────────────────────────────────────────────┘
@@ -67,19 +67,28 @@ RetroPrinter processes files strictly one at a time.
 
 ### 3. Identification and renaming (`ocr_rename.sh`)
 
-Reads the `.raw` file from `/home/pi/data/raw/` to identify the just-converted PDF. Since RetroPrinter generates its own filenames with no relation to the original `dfA0NNs12sun.raw` name, pairing is done by taking the **most recent RAW in the folder** rather than by name matching. This is reliable because:
+Called by `CustomScript.sh` with the full path of the just-converted PDF as argument (e.g. `/home/pi/data/pdf/retro-printer_2026-06-27_185249.pdf`). Processing a single specific file rather than scanning the folder is critical: without this, `ocr_rename.sh` would run in batch mode and process all pending PDFs on each invocation, consuming RAW files in the wrong order when text and graph jobs arrive within seconds of each other.
 
-- RetroPrinter processes files one at a time (no concurrent conversions)
-- `CustomScript.sh` holds a blocking flock for its entire duration (executions are serialized)
+Reads the appropriate `.raw` file from `/home/pi/data/raw/` to identify the PDF. Since RetroPrinter generates its own filenames with no relation to the original `dfA0NNs12sun.raw` name, and since both RAW files of a QTG pair arrive on the RPi almost simultaneously, simple "most recent" selection would pick the wrong RAW. Instead, the script selects the RAW with the **lowest `dfA0NN` sequence number** among those available:
 
-At the moment `ocr_rename.sh` runs, exactly one RAW file is present and it is always the correct one.
+- The Sun always sends text before graph (dfA0NN then dfA0NN+1)
+- RetroPrinter converts files in arrival order
+- Therefore: 1st PDF converted (text) → takes the lowest sequence RAW; 2nd PDF (graph) → takes the remaining one
+
+A fallback to most-recent is used if RAW files are not in the standard `dfA0NNs12sun.raw` format.
 
 From the RAW content, the script extracts:
 
-- **Simulator prefix** from the `SIMULATOR :` field → e.g. `[A330]`
-- **QTG test code** from the `CODE` pattern, or top non-empty lines as fallback
-- If the RAW contains no readable text code → categorized as `[GRAPH]`
-- If no RAW is found at all → categorized as `[UNKNOWN]`
+- **Simulator prefix** from the `SIMULATOR :` field → e.g. `[A330-200 RR]`
+- **QTG test code** from the `CODE` pattern (primary), or top non-empty lines as fallback
+
+Categorization rules applied in order:
+
+1. If `SIMULATOR :` is present and a code is found → **text file** → `[SIM] CODE date §NNN.pdf`
+2. If a code is found via top-lines fallback but contains **no digit** → rejected as graph noise (e.g. `PpGxaACCCArOxGgCcCppGP`) → `[GRAPH]`
+3. If a code is found (CODE pattern or top lines) but **no `SIMULATOR :` field** → graph with readable header → `[GRAPH]`. SIERRA text files always contain `SIMULATOR :`; graph files do not, even when they carry the QTG code in their header.
+4. If the RAW contains no extractable code after all filters → `[GRAPH]`
+5. If no RAW is found at all → `[UNKNOWN]`
 
 The spooler sequence number is extracted from the RAW filename and appended to the output PDF name as `§NNN` before the `.pdf` extension. This marker is what `group_qtg.sh` uses to pair files, and what the FTP step uses to hold back files not yet ready.
 
@@ -190,9 +199,11 @@ tail -f /var/log/retroprinterTSK.log
 
 ## Key Design Decisions
 
-**Sequence-based pairing over time-based pairing** — The Sun spooler assigns a monotonically incrementing 3-digit sequence number (`dfA0NN`) to each print job. Text and graph files from the same QTG test are always consecutive jobs (ecart of 1, modulo 1000). Using this as the pairing key is more reliable than any time window, and removes the need for the 90-second inter-file delay that was previously required on the Sun side.
+**Sequence-based pairing over time-based pairing** — The Sun spooler assigns a monotonically incrementing 3-digit sequence number (`dfA0NN`) to each print job. Text and graph files from the same QTG test are always consecutive jobs (écart of 1, modulo 1000). Using this as the pairing key is more reliable than any time window, and removes the need for the 90-second inter-file delay that was previously required on the Sun side.
 
-**Most-recent RAW matching, made reliable by serialization** — RetroPrinter generates its own filenames (`retro-printer_YYYY-MM-DD_HHMMSS[-FULL].pdf`) with no relation to the original `dfA0NNs12sun` spooler name, making name-based RAW↔PDF matching impossible. Instead, `ocr_rename.sh` picks the most recent RAW in `/home/pi/data/raw/`. This is safe because RetroPrinter processes files one at a time, and `CustomScript.sh` holds a blocking flock for its entire duration — at the moment `ocr_rename.sh` runs, exactly one RAW is present and it is always the correct one.
+**Sequence-based RAW↔PDF matching** — RetroPrinter generates its own filenames (`retro-printer_YYYY-MM-DD_HHMMSS[-FULL|-N].pdf`) with no relation to the original `dfA0NNs12sun` spooler name, making name-based matching impossible. Both RAW files of a QTG pair arrive on the RPi almost simultaneously, so "most recent" selection picks the wrong one. Instead, `ocr_rename.sh` selects the RAW with the lowest `dfA0NN` sequence number: the Sun always sends text (dfA0NN) before graph (dfA0NN+1), RetroPrinter converts in arrival order, so the first PDF always corresponds to the lowest sequence RAW.
+
+**`SIMULATOR :` field as the definitive text/graph discriminator** — Graph RAW files can contain readable text including the QTG code in their header, so extracting a code is not sufficient to classify a file as text. SIERRA text files always include a `SIMULATOR :` field; graph files never do. `ocr_rename.sh` requires both a QTG code and the `SIMULATOR :` field to classify a file as text. Any file with a code but no `SIMULATOR :` field is categorized as `[GRAPH]` regardless. An additional filter rejects top-lines candidates containing no digit, catching pure-letter graph noise patterns.
 
 **Serialized processing via flock** — `CustomScript.sh` holds a blocking file lock for its entire duration. Concurrent invocations (one per converted file) queue up and execute sequentially, replacing the upstream 90-second delay with downstream serialization. `group_qtg.sh` uses a non-blocking lock when called from cron (skip and retry in 2 minutes if busy), but blocks when called from within `CustomScript.sh` via the parent lock.
 
