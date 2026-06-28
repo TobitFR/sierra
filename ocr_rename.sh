@@ -39,7 +39,7 @@
 
 # Configuration
 TARGET_DIR="${1:-.}"
-LOG_FILE="/var/log/retroprinter.log"
+LOG_FILE="/var/log/sierra.log"
 LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
 
 # --- LOGGING ---

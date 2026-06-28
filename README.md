@@ -184,10 +184,11 @@ All PDFs in `/home/pi/data/pdf/` that do not already exist on the MMGT FTP serve
 
 ## Logs
 
+All scripts write to a single log file:
+
 | Log file | Content |
 |----------|---------|
-| `/var/log/retroprinter.log` | `ocr_rename.sh` and `group_qtg.sh` activity |
-| `/var/log/retroprinterTSK.log` | `CustomScript.sh` orchestration and FTP transfer activity |
+| `/var/log/sierra.log` | Full pipeline activity — `ocr_rename.sh`, `group_qtg.sh`, `CustomScript.sh` |
 
 ### Log levels
 
@@ -216,8 +217,12 @@ LOG_LEVEL="DEBUG"   # DEBUG | INFO | SILENT
 
 Monitor in real time during a test session (switch to `DEBUG` first):
 ```bash
-tail -f /var/log/retroprinter.log
-tail -f /var/log/retroprinterTSK.log
+tail -f /var/log/sierra.log
+```
+
+Also update the crontab entry to use the unified log file:
+```
+*/2 * * * * /home/pi/group_qtg.sh >> /var/log/sierra.log 2>&1
 ```
 
 ---

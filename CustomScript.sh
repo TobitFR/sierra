@@ -27,7 +27,7 @@
 #                         (suffixe " §NNN") sont exclus du transfert.
 #   4. Purge /tmp       - nettoyage des anciens fichiers retro-printer_*.
 
-LOG_FILE="/var/log/retroprinterTSK.log"
+LOG_FILE="/var/log/sierra.log"
 LOCK_FILE="/tmp/customscript.lock"
 LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
 

@@ -29,7 +29,7 @@
 # Protégé par flock pour éviter toute collision entre exécutions concurrentes.
 
 TARGET_DIR="${1:-/home/pi/data/pdf}"
-LOG_FILE="/var/log/retroprinter.log"
+LOG_FILE="/var/log/sierra.log"
 LOCK_FILE="/tmp/group_qtg.lock"
 SOLO_TIMEOUT_SECONDS=300   # 5 minutes
 LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
