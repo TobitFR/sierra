@@ -189,7 +189,32 @@ All PDFs in `/home/pi/data/pdf/` that do not already exist on the MMGT FTP serve
 | `/var/log/retroprinter.log` | `ocr_rename.sh` and `group_qtg.sh` activity |
 | `/var/log/retroprinterTSK.log` | `CustomScript.sh` orchestration and FTP transfer activity |
 
-Monitor in real time during a test session:
+### Log levels
+
+All three scripts expose a `LOG_LEVEL` variable at the top of the file:
+
+| Level | Description |
+|-------|-------------|
+| `DEBUG` | Full verbosity — all internal steps logged. Use for troubleshooting. |
+| `INFO` | Significant events only (default). Suitable for 24/7 production use. |
+| `SILENT` | Errors only. |
+
+`WARN` and `ERROR` messages are always written regardless of level.
+
+In `INFO` mode (default), only the following are logged:
+
+| Script | Events logged |
+|--------|--------------|
+| `ocr_rename.sh` | Effective renames |
+| `group_qtg.sh` | Pairing found, merge success, solo release, warnings |
+| `CustomScript.sh` | FTP transfers in progress and result, errors |
+
+To switch level, edit the variable at the top of each script:
+```bash
+LOG_LEVEL="DEBUG"   # DEBUG | INFO | SILENT
+```
+
+Monitor in real time during a test session (switch to `DEBUG` first):
 ```bash
 tail -f /var/log/retroprinter.log
 tail -f /var/log/retroprinterTSK.log

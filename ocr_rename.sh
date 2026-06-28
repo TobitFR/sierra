@@ -40,11 +40,14 @@
 # Configuration
 TARGET_DIR="${1:-.}"
 LOG_FILE="/var/log/retroprinter.log"
+LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
 
 # --- LOGGING ---
 log() {
     local level="$1"
     shift
+    [ "$LOG_LEVEL" = "SILENT" ] && [ "$level" != "ERROR" ] && return
+    [ "$LOG_LEVEL" = "INFO"   ] && [ "$level" = "DEBUG"  ] && return
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
 }
 
@@ -85,7 +88,7 @@ fi
 if [ -z "$PDF_ARG" ]; then
     PDF_ARG=$(ls -t "$TARGET_DIR"/*.pdf 2>/dev/null | grep -vE "[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -n 1)
     if [ -n "$PDF_ARG" ]; then
-        log "INFO" "Auto-detected latest PDF: $(basename "$PDF_ARG")"
+        log "DEBUG" "Auto-detected latest PDF: $(basename "$PDF_ARG")"
     fi
 fi
 
@@ -96,11 +99,11 @@ process_file() {
 
     # Skip if already renamed
     if [[ "$filename" =~ ^\[.*\] ]]; then
-        log "INFO" "Skipping already renamed file: $filename"
+        log "DEBUG" "Skipping already renamed file: $filename"
         return
     fi
 
-    log "INFO" "Processing: $filename"
+    log "DEBUG" "Processing: $filename"
 
     QTG_CODE=""
     PREFIX=""
@@ -138,7 +141,7 @@ process_file() {
 
         if [ -n "$best_raw" ]; then
             RAW_FILE="$best_raw"
-            log "INFO" "RAW selected by lowest sequence number: $(basename "$RAW_FILE") (seq $best_seq)"
+            log "DEBUG" "RAW selected by lowest sequence number: $(basename "$RAW_FILE") (seq $best_seq)"
         else
             # Fallback : plus récent (si les RAW ne sont pas au format dfA0NNs12sun.raw)
             log "WARN" "No dfA0NN-format RAW found — falling back to most recent."
@@ -150,7 +153,7 @@ process_file() {
     fi
 
     if [ -n "$RAW_FILE" ]; then
-        log "INFO" "Reading RAW file: $(basename "$RAW_FILE")"
+        log "DEBUG" "Reading RAW file: $(basename "$RAW_FILE")"
 
         # Extract Simulator Version (Prefix)
         local sim_line=$(grep -i "SIMULATOR :" "$RAW_FILE" | head -n 1)
@@ -158,7 +161,7 @@ process_file() {
             local sim_model=$(echo "$sim_line" | sed -E 's/.*SIMULATOR[[:space:]]*:[[:space:]]*([^[:space:]]+).*/\1/' | tr '_' ' ')
             if [ -n "$sim_model" ]; then
                 PREFIX="[$sim_model]"
-                log "INFO" "Found Simulator: $sim_model"
+                log "DEBUG" "Found Simulator: $sim_model"
             fi
         fi
 
@@ -169,7 +172,7 @@ process_file() {
             if [ -n "$extract" ] && [ ${#extract} -ge 3 ]; then
                 QTG_CODE="$extract"
                 OUTCOME="RAW_CODE_PATTERN"
-                log "INFO" "Extracted QTG from RAW (CODE pattern): $QTG_CODE"
+                log "DEBUG" "Extracted QTG from RAW (CODE pattern): $QTG_CODE"
             fi
         fi
 
@@ -192,7 +195,7 @@ process_file() {
                 if echo "$raw_extract_line" | grep -qE '[0-9]'; then
                     QTG_CODE="$raw_extract_line"
                     OUTCOME="RAW_TOP_LINES"
-                    log "INFO" "Extracted QTG from RAW (top lines): $QTG_CODE"
+                    log "DEBUG" "Extracted QTG from RAW (top lines): $QTG_CODE"
                 else
                     log "WARN" "RAW top lines extraction returned no digits ('$raw_extract_line') — likely graph noise, categorizing as GRAPH."
                 fi
@@ -223,12 +226,12 @@ process_file() {
         local raw_basename=$(basename "$RAW_FILE")
         SEQ_NUM=$(echo "$raw_basename" | sed -nE 's/^dfA([0-9]{3}).*/\1/p')
         if [ -n "$SEQ_NUM" ]; then
-            log "INFO" "Extracted spooler sequence: $SEQ_NUM"
+            log "DEBUG" "Extracted spooler sequence: $SEQ_NUM"
         else
             log "WARN" "Could not extract spooler sequence from: $raw_basename"
         fi
 
-        log "INFO" "Cleaning up RAW file: $(basename "$RAW_FILE")"
+        log "DEBUG" "Cleaning up RAW file: $(basename "$RAW_FILE")"
         rm -f "$RAW_FILE"
 
     else
@@ -257,7 +260,7 @@ process_file() {
         mv "$file" "$target_path"
         log "INFO" "Renamed [${OUTCOME}]: $filename -> $new_filename"
     else
-        log "INFO" "File already named correctly: $filename"
+        log "DEBUG" "File already named correctly: $filename"
     fi
 }
 
@@ -265,7 +268,7 @@ process_file() {
 if [ -n "$PDF_ARG" ]; then
     process_file "$PDF_ARG" "$RAW_ARG"
 else
-    log "INFO" "Batch mode: scanning $TARGET_DIR"
+    log "DEBUG" "Batch mode: scanning $TARGET_DIR"
     find "$TARGET_DIR" -maxdepth 1 -name "*.pdf" -print0 | while IFS= read -r -d '' pdf; do
         process_file "$pdf"
     done

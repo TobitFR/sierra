@@ -32,18 +32,21 @@ TARGET_DIR="${1:-/home/pi/data/pdf}"
 LOG_FILE="/var/log/retroprinter.log"
 LOCK_FILE="/tmp/group_qtg.lock"
 SOLO_TIMEOUT_SECONDS=300   # 5 minutes
+LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
 
 # --- LOGGING ---
 log() {
     local level="$1"
     shift
+    [ "$LOG_LEVEL" = "SILENT" ] && [ "$level" != "ERROR" ] && return
+    [ "$LOG_LEVEL" = "INFO"   ] && [ "$level" = "DEBUG"  ] && return
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
 }
 
 # --- LOCK : une seule exécution à la fois ---
 exec 200>"$LOCK_FILE"
 if ! flock -n 200; then
-    log "INFO" "group_qtg.sh already running elsewhere, skipping this pass."
+    log "DEBUG" "group_qtg.sh already running elsewhere, skipping this pass."
     exit 0
 fi
 
@@ -123,11 +126,11 @@ cd "$TARGET_DIR" || { log "ERROR" "Cannot cd to $TARGET_DIR"; exit 1; }
 mapfile -t candidates < <(find . -maxdepth 1 -name "*.pdf" -print0 | xargs -0 -n1 basename 2>/dev/null | grep -E '§[0-9]{3}\.pdf$')
 
 if [ ${#candidates[@]} -eq 0 ]; then
-    log "INFO" "group_qtg.sh: no sequenced PDF candidates found."
+    log "DEBUG" "group_qtg.sh: no sequenced PDF candidates found."
     exit 0
 fi
 
-log "INFO" "group_qtg.sh: ${#candidates[@]} sequenced candidate(s) found."
+log "DEBUG" "group_qtg.sh: ${#candidates[@]} sequenced candidate(s) found."
 
 declare -A processed
 
@@ -157,7 +160,7 @@ for file_a in "${candidates[@]}"; do
                 partner_seq="$seq_b"
                 break
             else
-                log "INFO" "Consecutive pair §${seq_a}/§${seq_b} rejected ($(basename "$file_a") + $(basename "$file_b") — incompatible types, both will go solo after timeout)."
+                log "WARN" "Consecutive pair §${seq_a}/§${seq_b} rejected ($(basename "$file_a") + $(basename "$file_b") — incompatible types, both will go solo after timeout)."
             fi
         fi
     done
@@ -227,9 +230,9 @@ for file_a in "${candidates[@]}"; do
             fi
             processed["$file_a"]=1
         else
-            log "INFO" "No partner (yet) for '$file_a' (age ${file_age}s < ${SOLO_TIMEOUT_SECONDS}s) — will retry next pass."
+            log "DEBUG" "No partner (yet) for '$file_a' (age ${file_age}s < ${SOLO_TIMEOUT_SECONDS}s) — will retry next pass."
         fi
     fi
 done
 
-log "INFO" "group_qtg.sh: pass completed."
+log "DEBUG" "group_qtg.sh: pass completed."

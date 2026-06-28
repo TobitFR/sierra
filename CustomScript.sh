@@ -29,11 +29,14 @@
 
 LOG_FILE="/var/log/retroprinterTSK.log"
 LOCK_FILE="/tmp/customscript.lock"
+LOG_LEVEL="INFO"   # DEBUG = tout logguer | INFO = événements significatifs uniquement | SILENT = erreurs seulement
 
 # --- LOGGING ---
 log() {
     local level="$1"
     shift
+    [ "$LOG_LEVEL" = "SILENT" ] && [ "$level" != "ERROR" ] && return
+    [ "$LOG_LEVEL" = "INFO"   ] && [ "$level" = "DEBUG"  ] && return
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $*" | tee -a "$LOG_FILE"
 }
 
@@ -43,7 +46,7 @@ if ! flock -w 600 200; then
     log "ERROR" "Could not acquire lock after 600s wait — aborting this run."
     exit 1
 fi
-log "INFO" "Lock acquired, starting run."
+log "DEBUG" "Lock acquired, starting run."
 
 #------------------------------------
 # OCR Rename
@@ -58,22 +61,22 @@ if [ -z "$PDF_REAL" ]; then
     log "ERROR" "Cannot find PDF matching '${1}${PDF_BASE}*.pdf' — aborting."
     exit 1
 fi
-log "INFO" "Starting ocr_rename.sh for: $(basename "$PDF_REAL")"
+log "DEBUG" "Starting ocr_rename.sh for: $(basename "$PDF_REAL")"
 /home/pi/ocr_rename.sh "$PDF_REAL"
 if [ $? -ne 0 ]; then
     log "ERROR" "ocr_rename.sh exited with error - FTP transfer aborted"
     exit 1
 fi
-log "INFO" "ocr_rename.sh completed"
+log "DEBUG" "ocr_rename.sh completed"
 
 #------------------------------------
 # Group QTG (texte + graphique) en un seul PDF
-log "INFO" "Starting group_qtg.sh"
+log "DEBUG" "Starting group_qtg.sh"
 /home/pi/group_qtg.sh
 if [ $? -ne 0 ]; then
     log "ERROR" "group_qtg.sh exited with error - continuing anyway (non-blocking)"
 fi
-log "INFO" "group_qtg.sh completed"
+log "DEBUG" "group_qtg.sh completed"
 
 #------------------------------------
 # FTP Transfer to MMGT Computer D:/QTG
@@ -83,7 +86,7 @@ FTP_PASS="rootroot"
 FTP_IP="44.63.12.99"
 FTP_DIR="/"
 
-log "INFO" "Fetching FTP file list from $FTP_IP"
+log "DEBUG" "Fetching FTP file list from $FTP_IP"
 ftp_file_list=$(lftp -u "$FTP_USER","$FTP_PASS" ftp://$FTP_IP -e "set ftp:ssl-allow no; cd $FTP_DIR; cls; bye")
 
 file_exists_on_ftp() {
@@ -99,12 +102,12 @@ for file in "$SRC_DIR"*.pdf; do
     # Ne pas transférer un PDF qui attend encore son partenaire texte/graphique
     # (group_qtg.sh le libère une fois fusionné ou après timeout solo).
     if [[ "$basefile" =~ §[0-9]{3}\.pdf$ ]]; then
-        log "INFO" "Still awaiting pairing, skipping for now: $basefile"
+        log "DEBUG" "Still awaiting pairing, skipping for now: $basefile"
         continue
     fi
 
     if file_exists_on_ftp "$basefile"; then
-        log "INFO" "Already on FTP, skipping: $basefile"
+        log "DEBUG" "Already on FTP, skipping: $basefile"
     else
         log "INFO" "Transferring: $basefile"
         lftp -u "$FTP_USER","$FTP_PASS" ftp://$FTP_IP -e "set ftp:ssl-allow no; cd $FTP_DIR; put \"$file\"; bye"
@@ -119,7 +122,7 @@ done
 
 #------------------------------------
 # Purge /tmp
-log "INFO" "Purging old /tmp/retro-printer_* files"
+log "DEBUG" "Purging old /tmp/retro-printer_* files"
 cd /tmp
 today=$(date +%Y-%m-%d)
 
@@ -127,8 +130,8 @@ for f in retro-printer_*; do
     date_fichier=${f#retro-printer_}
     if [ "$date_fichier" \< "$today" ]; then
         rm -- "$f"
-        log "INFO" "Deleted tmp file: $f"
+        log "DEBUG" "Deleted tmp file: $f"
     fi
 done
 
-log "INFO" "CustomScript completed"
+log "DEBUG" "CustomScript completed"
